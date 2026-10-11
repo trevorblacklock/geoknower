@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
+from random import randint
 
 import healpy as hp
 import numpy as np
@@ -7,6 +8,7 @@ import torch
 from numpy.typing import ArrayLike
 from torch import nn
 from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from .grid import colatlon_to_cart, latlon_to_cart, pix_to_cart
@@ -134,16 +136,18 @@ def train_model(
     loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     val_fn: Callable[..., torch.Tensor],
     num_epochs: int,
-    checkpoint_dir: str = "checkpoints",
-    checkpoint_name: str = "geomodel",
+    scheduler: LRScheduler | None = None,
+    checkpoint_path: str = "checkpoints/",
     checkpoint_rate: int = 0,
     autocast: bool = True,
     gradscaler: bool = True,
     device: str = "cuda",
     **kwargs,
 ):
+    seed = randint(100000, 999999)
     if checkpoint_rate != 0:
-        Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        path = Path(checkpoint_path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     train_targets = torch.as_tensor(train_targets, dtype=torch.float32)
     val_targets = torch.as_tensor(val_targets, dtype=torch.float32)
@@ -156,7 +160,6 @@ def train_model(
     num_train = len(train_dataloader) * train_batch_size
     num_val = len(val_dataloader) * val_batch_size
 
-    checkpoint_num = 1
     model = model.to(device)
 
     for param in model.encoder.parameters():
@@ -193,13 +196,17 @@ def train_model(
                 predicate = val_fn(logits, target, **kwargs)
                 accuracy += torch.sum(predicate)
 
+        if isinstance(scheduler, ReduceLROnPlateau):
+            scheduler.step(loss, epoch)
+        elif scheduler:
+            scheduler.step()
+
         print(
             f"Epoch: {epoch + 1} | Loss: {running / num_train:.6f}"
             f" | Accuracy: {100 * accuracy / num_val:.6f}%"
         )
 
         if checkpoint_rate != 0 and (epoch + 1) % checkpoint_rate == 0:
-            fdir = Path(checkpoint_dir, f"{checkpoint_name}-ckpt-{checkpoint_num}.pt")
+            fdir = Path(checkpoint_path, f"ckpt-{seed}-{epoch + 1}.pt")
             print(f"Saving a checkpoint for epoch {epoch + 1} under {fdir}.")
             torch.save(model.state_dict(), fdir)
-            checkpoint_num += 1
