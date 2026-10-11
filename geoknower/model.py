@@ -40,7 +40,7 @@ class GeoModel(nn.Module):
         super().__init__()
 
         self.encoder = timm.create_model(
-            f"tiny_vit_5m_{IMG_SIZE}.dist_in22k_ft_in1k",
+            f"tiny_vit_21m_{IMG_SIZE}.dist_in22k_ft_in1k",
             pretrained=True,
             num_classes=0,
         )
